@@ -1,5 +1,6 @@
 #include "protocol.h"
 #include "serial.h"
+#include "logger.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -60,6 +61,53 @@ r,&minute,&second) != 6)
     return 0;
 }
 
+static int telemetry_time_is_sane(
+    const Telemetry_t *telemetry)
+{
+    struct tm tm_value = {0};
+    time_t stm_time;
+    time_t pi_time;
+    double difference;
+
+    if (telemetry == NULL)
+    {
+        return 0;
+    }
+
+    if (telemetry->year < 2026)
+    {
+        return 0;
+    }
+
+    tm_value.tm_year = telemetry->year - 1900;
+    tm_value.tm_mon = telemetry->month - 1;
+    tm_value.tm_mday = telemetry->day;
+    tm_value.tm_hour = telemetry->hour;
+    tm_value.tm_min = telemetry->minute;
+    tm_value.tm_sec = telemetry->second;
+    tm_value.tm_isdst = -1;
+
+    stm_time = mktime(&tm_value);
+
+    if (stm_time == (time_t)-1)
+    {
+        return 0;
+    }
+
+    pi_time = time(NULL);
+
+    difference = difftime(
+        pi_time,
+        stm_time);
+
+    if (difference < 0.0)
+    {
+        difference = -difference;
+    }
+
+    return (difference <= 60.0);
+}
+
 static int send_setdt_command(int fd)
 {
     time_t now;
@@ -107,6 +155,22 @@ void Protocol_ProcessMessage(int fd, const char *message)
     printf("%s\n", message);
     fflush(stdout);
 
+    if (strncmp(message, "WB1,", 4U) == 0)
+    {
+        Telemetry_t telemetry;
+
+	if (Protocol_ParseTelemetry(message, &telemetry) == 0)
+	{
+	    if (telemetry_time_is_sane(&telemetry))
+	    {
+	        if (Logger_LogTelemetry(&telemetry) != 0)
+		{
+		    fprintf(stderr, "Warning: telemetry logging failed\n");
+		}
+	    }
+	}
+    }
+    
     switch (rtc_sync_state)
     {
         case RTC_SYNC_IDLE:
