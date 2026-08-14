@@ -214,3 +214,36 @@ void Protocol_Init(void)
 {
     rtc_sync_state = RTC_SYNC_IDLE;
 }
+
+int Protocol_ParseTelemetry(
+    const char *message,
+    Telemetry_t *telemetry)
+{
+    if ((message == NULL) ||
+        (telemetry == NULL))
+    {
+        return -1;
+    }
+
+    if (sscanf(
+            message,
+            "WB1,DATE=%d-%d-%d,"
+            "TIME=%d:%d:%d,"
+            "TEMP=%fC,"
+            "HUM=%f%%,"
+            "WATER=%luHz",
+            &telemetry->year,
+            &telemetry->month,
+            &telemetry->day,
+            &telemetry->hour,
+            &telemetry->minute,
+            &telemetry->second,
+            &telemetry->temperature_c,
+            &telemetry->humidity_percent,
+            &telemetry->water_frequency_hz) != 9)
+    {
+        return -1;
+    }
+
+    return 0;
+}
