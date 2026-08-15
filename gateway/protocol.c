@@ -1,6 +1,7 @@
 #include "protocol.h"
 #include "serial.h"
 #include "logger.h"
+#include "status.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -161,6 +162,7 @@ void Protocol_ProcessMessage(int fd, const char *message)
 
 	if (Protocol_ParseTelemetry(message, &telemetry) == 0)
 	{
+	    Status_UpdateTelemetry(&telemetry);
 	    if (telemetry_time_is_sane(&telemetry))
 	    {
 	        if (Logger_LogTelemetry(&telemetry) != 0)
@@ -169,6 +171,10 @@ void Protocol_ProcessMessage(int fd, const char *message)
 		}
 	    }
 	}
+	else
+	{
+	    Status_RecordParseError();
+	}    
     }
     
     switch (rtc_sync_state)

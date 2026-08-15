@@ -6,7 +6,8 @@ TARGET = gateway/watergateway
 OBJECTS = gateway/main.o \
           gateway/serial.o \
           gateway/protocol.o \
-	  gateway/logger.o
+	  gateway/logger.o \
+	  gateway/status.o
 
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS)
@@ -22,6 +23,9 @@ gateway/protocol.o: gateway/protocol.c gateway/protocol.h gateway/serial.h
 
 gateway/logger.o: gateway/logger.c gateway/logger.h gateway/protocol.h
 	$(CC) $(CFLAGS) -c gateway/logger.c -o gateway/logger.o
+
+gateway/status.o: gateway/status.c gateway/status.h gateway/protocol.h
+	$(CC) $(CFLAGS) -c gateway/status.c -o gateway/status.o
 
 clean:
 	rm -f $(OBJECTS) $(TARGET)

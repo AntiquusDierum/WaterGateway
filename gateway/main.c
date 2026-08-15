@@ -1,6 +1,7 @@
 #include "protocol.h"
 #include "serial.h"
 #include "logger.h"
+#include "status.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,7 @@ int main(void)
     }
 
     Protocol_Init();
+    Status_Init();
 
     if (Logger_Init() != 0)
     {
