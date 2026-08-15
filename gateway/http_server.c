@@ -147,16 +147,46 @@ void HttpServer_Task(void)
         perror("accept");
         return;
     }
+    /*
+     * The accepted connection must also be non-blocking.
+     * Otherwise an idle browser connection could stall the
+     * whole WaterGateway application.
+     */
+    if (set_nonblocking(client_fd) != 0)
+    {
+	perror("fcntl");
 
+	close(client_fd);
+	return;
+    }
     /*
      * We don't need to interpret the request yet.
      * Reading it simply consumes the browser's HTTP request.
      */
-    (void)read(
-        client_fd,
-        request,
-        sizeof(request));
+    ssize_t request_length;
 
+    request_length = read(client_fd,request,sizeof(request));
+
+    if (request_length < 0)
+    {
+        if ((errno == EAGAIN) ||
+            (errno == EWOULDBLOCK))
+	{
+	    close(client_fd);
+            return;
+	}
+
+	perror("read");
+	close(client_fd);
+	return;
+    }
+
+    if (request_length == 0)
+    {
+        close(client_fd);
+	return;
+    }
+    
     status = Status_Get();
 
     if (Status_TelemetryIsFresh())
@@ -198,7 +228,7 @@ void HttpServer_Task(void)
             "<hr>"
             "<p><strong>Temperature:</strong> %.1f &deg;C</p>"
             "<p><strong>Humidity:</strong> %.1f %%</p>"
-            "<p><strong>Water:</strong> %lu Hz</p>"
+            "<p><strong>Water sensor frequency:</strong> %lu Hz</p>"
             "<hr>"
             "<p><strong>Packets received:</strong> %lu</p>"
             "<p><strong>Parse errors:</strong> %lu</p>"
@@ -224,16 +254,18 @@ void HttpServer_Task(void)
             "Connection: close\r\n"
             "\r\n"
 
-            "<!DOCTYPE html>"
-            "<html>"
-            "<head>"
-            "<title>WaterGateway</title>"
-            "</head>"
-            "<body>"
-            "<h1>WaterGateway</h1>"
-            "<p><strong>Status:</strong> NO TELEMETRY</p>"
-            "</body>"
-            "</html>");
+	    "<!DOCTYPE html>"
+	    "<html>"
+	    "<head>"
+	    "<title>WaterGateway</title>"
+	    "<meta http-equiv=\"refresh\" content=\"5\">"
+	    "</head>"
+	    "<body>"
+	    "<h1>WaterGateway</h1>"
+	    "<p><strong>Status:</strong> NO TELEMETRY</p>"
+	    "</body>"
+	    "</html>"
+		 );
     }
 
     (void)write(

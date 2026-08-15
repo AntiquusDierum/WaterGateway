@@ -70,6 +70,17 @@ int Serial_Open(const char *device)
         return -1;
     }
 
+/*
+ * Discard any stale receive data left in the UART/USB
+ * buffers from a previous WaterGateway session.
+ */
+    if (tcflush(fd, TCIFLUSH) != 0)
+    {
+        perror("tcflush");
+        close(fd);
+        return -1;
+    }
+
     return fd;
 }
 
