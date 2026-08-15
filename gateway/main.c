@@ -2,6 +2,7 @@
 #include "serial.h"
 #include "logger.h"
 #include "status.h"
+#include "http_server.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,6 +38,11 @@ int main(void)
     Protocol_Init();
     Status_Init();
 
+    if (HttpServer_Init() != 0)
+    {
+        fprintf(stderr,"Warning: HTTP server initialisation failed\n");
+    }
+
     if (Logger_Init() != 0)
     {
 	fprintf(stderr, "Warning: logger initialisation failed\n");
@@ -49,6 +55,9 @@ int main(void)
     {
         int result;
 
+	Protocol_Task();
+	HttpServer_Task();
+	
         result = Serial_ReadByte(
             fd,
             &byte);
@@ -102,6 +111,8 @@ int main(void)
         }
     }
 
+    HttpServer_Close();
+    
     Serial_Close(fd);
 
     return EXIT_FAILURE;

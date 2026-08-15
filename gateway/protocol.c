@@ -8,6 +8,7 @@
 #include <time.h>
 
 #define RTC_SYNC_TOLERANCE_SECONDS 10.0
+#define RTC_SYNC_TIMEOUT_SECONDS 10.0
 
 typedef enum
 {
@@ -19,6 +20,21 @@ typedef enum
 } RtcSyncState_t;
 
 static RtcSyncState_t rtc_sync_state = RTC_SYNC_IDLE;
+static time_t rtc_sync_started = 0;
+
+static void rtc_sync_set_state(RtcSyncState_t new_state)
+{
+    rtc_sync_state = new_state;
+
+    if (new_state == RTC_SYNC_IDLE)
+    {
+        rtc_sync_started = 0;
+    }
+    else
+    {
+        rtc_sync_started = time(NULL);
+    }
+}
 
 static int parse_stm_datetime(const char *message, time_t *stm_time)
 {
@@ -217,8 +233,7 @@ void Protocol_ProcessMessage(int fd, const char *message)
 
                 if (Serial_WriteString(fd, "\r") == 0)
                 {
-                    rtc_sync_state =
-                        RTC_SYNC_WAIT_COMMAND_MODE;
+		    rtc_sync_set_state(RTC_SYNC_WAIT_COMMAND_MODE);
                 }
             }
 
@@ -233,8 +248,7 @@ void Protocol_ProcessMessage(int fd, const char *message)
             {
                 if (send_setdt_command(fd) == 0)
                 {
-                    rtc_sync_state =
-                        RTC_SYNC_WAIT_SET_ACK;
+		    rtc_sync_set_state(RTC_SYNC_WAIT_SET_ACK);
                 }
             }
 
@@ -249,8 +263,7 @@ void Protocol_ProcessMessage(int fd, const char *message)
             {
                 if (Serial_WriteString(fd, "exit\r") == 0)
                 {
-                    rtc_sync_state =
-                        RTC_SYNC_WAIT_STREAM_MODE;
+		    rtc_sync_set_state(RTC_SYNC_WAIT_STREAM_MODE);
                 }
             }
 
@@ -265,8 +278,7 @@ void Protocol_ProcessMessage(int fd, const char *message)
             {
                 printf(
                     "STM32 RTC synchronisation complete\n");
-
-                rtc_sync_state = RTC_SYNC_IDLE;
+		rtc_sync_set_state(RTC_SYNC_IDLE);
             }
 
             break;
@@ -274,7 +286,8 @@ void Protocol_ProcessMessage(int fd, const char *message)
 
         default:
         {
-            rtc_sync_state = RTC_SYNC_IDLE;
+	    rtc_sync_set_state(RTC_SYNC_IDLE);
+
             break;
         }
     }
@@ -282,7 +295,7 @@ void Protocol_ProcessMessage(int fd, const char *message)
 
 void Protocol_Init(void)
 {
-    rtc_sync_state = RTC_SYNC_IDLE;
+    rtc_sync_set_state(RTC_SYNC_IDLE);
 }
 
 int Protocol_ParseTelemetry(
@@ -317,3 +330,33 @@ int Protocol_ParseTelemetry(
 
     return 0;
 }
+
+void Protocol_Task(void)
+{
+
+    time_t now;
+    double elapsed;
+
+    if (rtc_sync_state == RTC_SYNC_IDLE)
+    {
+        return;
+    }
+
+    now = time(NULL);
+
+    elapsed = difftime(
+        now,
+        rtc_sync_started);
+
+    if (elapsed >= RTC_SYNC_TIMEOUT_SECONDS)
+    {
+        fprintf(
+            stderr,
+            "RTC synchronisation timed out; "
+            "returning to idle state\n");
+
+        rtc_sync_set_state(
+            RTC_SYNC_IDLE);
+    }
+}
+

@@ -29,8 +29,12 @@ static int Serial_Configure(int fd)
     tty.c_cflag |= CS8;
     tty.c_cflag &= ~CRTSCTS;
 
-    tty.c_cc[VMIN] = 1;
-    tty.c_cc[VTIME] = 0;
+    /*
+     * Return from read() after at most 100 ms so the main loop
+     * can also service other tasks such as the HTTP server.
+     */
+    tty.c_cc[VMIN] = 0;
+    tty.c_cc[VTIME] = 1;
 
     if (tcsetattr(fd, TCSANOW, &tty) != 0)
     {
