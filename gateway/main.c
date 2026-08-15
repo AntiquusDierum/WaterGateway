@@ -1,5 +1,6 @@
 #include "protocol.h"
 #include "serial.h"
+#include "logger.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,11 @@ int main(void)
 
     Protocol_Init();
 
+    if (Logger_Init() != 0)
+    {
+	fprintf(stderr, "Warning: logger initialisation failed\n");
+    }
+    
     printf(
         "eRIC receiver ready\n");
 
