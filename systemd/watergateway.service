@@ -1,0 +1,14 @@
+[Unit]
+Description=WaterGateway eRIC telemetry receiver
+After=network.target
+
+[Service]
+Type=simple
+User=alan
+WorkingDirectory=/home/alan/Projects/WaterGateway
+ExecStart=/home/alan/Projects/WaterGateway/gateway/watergateway
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
