@@ -5,3 +5,9 @@
 *.pyc
 __pycache__/
 .vscode/
+# C build products
+*.o
+gateway/watergateway
+
+# Runtime telemetry logs
+logs/
