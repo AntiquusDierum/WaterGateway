@@ -8,7 +8,8 @@ OBJECTS = gateway/main.o \
           gateway/protocol.o \
 	  gateway/logger.o \
 	  gateway/status.o \
-	  gateway/http_server.o
+	  gateway/http_server.o \
+	  gateway/uplink.o
 
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS)
@@ -30,6 +31,9 @@ gateway/status.o: gateway/status.c gateway/status.h gateway/protocol.h
 
 gateway/http_server.o: gateway/http_server.c gateway/http_server.h gateway/status.h
 	$(CC) $(CFLAGS) -c gateway/http_server.c -o gateway/http_server.o
+
+gateway/uplink.o: gateway/uplink.c gateway/uplink.h gateway/protocol.h
+	$(CC) $(CFLAGS) -c gateway/uplink.c -o gateway/uplink.o
 
 clean:
 	rm -f $(OBJECTS) $(TARGET)

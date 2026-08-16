@@ -2,6 +2,7 @@
 #include "serial.h"
 #include "logger.h"
 #include "status.h"
+#include "uplink.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -184,6 +185,10 @@ void Protocol_ProcessMessage(int fd, const char *message)
 	        if (Logger_LogTelemetry(&telemetry) != 0)
 		{
 		    fprintf(stderr, "Warning: telemetry logging failed\n");
+		}
+		if (Uplink_SendTelemetry(&telemetry) != 0)
+		{
+		    fprintf(stderr, "Warning: telemetry uplink failed\n");
 		}
 	    }
 	}
