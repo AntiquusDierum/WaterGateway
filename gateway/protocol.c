@@ -10,6 +10,7 @@
 
 #define RTC_SYNC_TOLERANCE_SECONDS 10.0
 #define RTC_SYNC_TIMEOUT_SECONDS 10.0
+#define RTC_SYNC_RETRY_SECONDS 60.0
 
 typedef enum
 {
@@ -22,6 +23,7 @@ typedef enum
 
 static RtcSyncState_t rtc_sync_state = RTC_SYNC_IDLE;
 static time_t rtc_sync_started = 0;
+static time_t rtc_sync_retry_after = 0;
 
 static void rtc_sync_set_state(RtcSyncState_t new_state)
 {
@@ -229,36 +231,42 @@ void Protocol_ProcessMessage(int fd, const char *message)
                 difference = -difference;
             }
 
-            if (difference > RTC_SYNC_TOLERANCE_SECONDS)
-            {
-                printf(
-                    "STM32 RTC differs from Pi by %.1f seconds; "
-                    "synchronising...\n",
-                    difference);
+	    if (difference > RTC_SYNC_TOLERANCE_SECONDS)
+	    {
+	        time_t now;
 
-                if (Serial_WriteString(fd, "\r") == 0)
-                {
-		    rtc_sync_set_state(RTC_SYNC_WAIT_COMMAND_MODE);
-                }
-            }
+		now = time(NULL);
+
+		if ((rtc_sync_retry_after == 0) ||
+		    (now >= rtc_sync_retry_after))
+		{
+		    printf("STM32 RTC differs from Pi by %.1f seconds; "
+			   "synchronising...\n",
+			   difference);
+
+		    if (Serial_WriteString(fd, "\r") == 0)
+		    {
+		        rtc_sync_set_state(RTC_SYNC_WAIT_COMMAND_MODE);
+		    }
+		}
+	    }
 
             break;
         }
-
+	
 	case RTC_SYNC_WAIT_COMMAND_MODE:
-        {
-            if (strcmp(
-                    message,
-                    "REMOTE,MODE=COMMAND") == 0)
-            {
-                if (send_setdt_command(fd) == 0)
-                {
+	{
+	    if (strcmp(message,"REMOTE,MODE=COMMAND") == 0)
+	    {
+	        if (send_setdt_command(fd) == 0)
+		{
 		    rtc_sync_set_state(RTC_SYNC_WAIT_SET_ACK);
-                }
-            }
-
+		}
+	    }
+       	 
             break;
-        }
+	}
+
         case RTC_SYNC_WAIT_SET_ACK:
         {
             if (strncmp(
@@ -283,6 +291,7 @@ void Protocol_ProcessMessage(int fd, const char *message)
             {
                 printf(
                     "STM32 RTC synchronisation complete\n");
+		rtc_sync_retry_after = 0;
 		rtc_sync_set_state(RTC_SYNC_IDLE);
             }
 
@@ -336,7 +345,7 @@ int Protocol_ParseTelemetry(
     return 0;
 }
 
-void Protocol_Task(void)
+void Protocol_Task(int serial_fd)
 {
 
     time_t now;
@@ -355,13 +364,19 @@ void Protocol_Task(void)
 
     if (elapsed >= RTC_SYNC_TIMEOUT_SECONDS)
     {
-        fprintf(
-            stderr,
-            "RTC synchronisation timed out; "
-            "returning to idle state\n");
+        fprintf(stderr,
+		"RTC synchronisation timed out; "
+		"forcing stream mode\n");
 
-        rtc_sync_set_state(
-            RTC_SYNC_IDLE);
+	if (Serial_WriteString(serial_fd,"exit\r") != 0)
+	{
+	    fprintf(stderr,
+		    "Warning: unable to send stream-mode recovery command\n");
+	}
+
+	rtc_sync_retry_after = time(NULL) + (time_t)RTC_SYNC_RETRY_SECONDS;
+	
+	rtc_sync_set_state(RTC_SYNC_IDLE);
     }
 }
 
