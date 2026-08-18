@@ -1,5 +1,8 @@
 #include "uplink.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <string.h>
@@ -8,6 +11,117 @@
 
 #define UPLINK_SERVER_ADDRESS "192.168.2.101"
 #define UPLINK_SERVER_PORT 8090
+#define UPLINK_CONNECT_TIMEOUT_MS 1000
+
+static int Uplink_ConnectWithTimeout(
+    int fd,
+    const struct sockaddr *address,
+    socklen_t address_length,
+    int timeout_ms)
+{
+    int flags;
+    int result;
+    int socket_error;
+    socklen_t socket_error_length;
+    struct pollfd poll_fd;
+
+    flags = fcntl(fd, F_GETFL, 0);
+
+    if (flags < 0)
+    {
+        perror("uplink fcntl get");
+        return -1;
+    }
+
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
+    {
+        perror("uplink fcntl set");
+        return -1;
+    }
+
+    result = connect(
+        fd,
+        address,
+        address_length);
+
+    if (result == 0)
+    {
+        /*
+         * Connected immediately.
+         */
+        (void)fcntl(fd, F_SETFL, flags);
+        return 0;
+    }
+
+    if (errno != EINPROGRESS)
+    {
+        perror("uplink connect");
+        (void)fcntl(fd, F_SETFL, flags);
+        return -1;
+    }
+
+    poll_fd.fd = fd;
+    poll_fd.events = POLLOUT;
+    poll_fd.revents = 0;
+
+    result = poll(
+        &poll_fd,
+        1,
+        timeout_ms);
+
+    if (result == 0)
+    {
+        fprintf(
+            stderr,
+            "uplink connect: timed out after %d ms\n",
+            timeout_ms);
+
+        (void)fcntl(fd, F_SETFL, flags);
+        return -1;
+    }
+
+    if (result < 0)
+    {
+        perror("uplink poll");
+        (void)fcntl(fd, F_SETFL, flags);
+        return -1;
+    }
+
+    socket_error = 0;
+    socket_error_length = sizeof(socket_error);
+
+    if (getsockopt(
+            fd,
+            SOL_SOCKET,
+            SO_ERROR,
+            &socket_error,
+            &socket_error_length) < 0)
+    {
+        perror("uplink getsockopt");
+        (void)fcntl(fd, F_SETFL, flags);
+        return -1;
+    }
+
+    if (socket_error != 0)
+    {
+        errno = socket_error;
+        perror("uplink connect");
+
+        (void)fcntl(fd, F_SETFL, flags);
+        return -1;
+    }
+
+    /*
+     * Restore normal blocking operation once connected.
+     */
+    if (fcntl(fd, F_SETFL, flags) < 0)
+    {
+        perror("uplink fcntl restore");
+        return -1;
+    }
+
+    return 0;
+}
 
 int Uplink_SendTelemetry(
     const Telemetry_t *telemetry)
@@ -98,15 +212,12 @@ int Uplink_SendTelemetry(
         return -1;
     }
 
-    if (connect(
-            fd,
-            (struct sockaddr *)&server,
-            sizeof(server)) < 0)
+    if (Uplink_ConnectWithTimeout(fd,(struct sockaddr *)&server,
+	sizeof(server),UPLINK_CONNECT_TIMEOUT_MS) != 0)
     {
-        perror("uplink connect");
         close(fd);
-        return -1;
-    }
+	return -1;
+    } 
 
     if (write(
             fd,
