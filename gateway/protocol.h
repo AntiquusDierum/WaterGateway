@@ -4,9 +4,22 @@
 void Protocol_Init(void);
 void Protocol_Task(int serial_fd);
 
-void Protocol_ProcessMessage(
-    int serial_fd,
-    const char *message);
+typedef enum
+{
+    PROTOCOL_RELAY_UNKNOWN = -1,
+    PROTOCOL_RELAY_OFF = 0,
+    PROTOCOL_RELAY_ON = 1
+
+} ProtocolRelayState_t;
+
+int Protocol_RequestRelay(int serial_fd, unsigned int relay_number,
+    ProtocolRelayState_t state);
+
+ProtocolRelayState_t Protocol_GetRelayState(unsigned int relay_number);
+
+int Protocol_IsBusy(void);
+
+void Protocol_ProcessMessage(int serial_fd, const char *message);
 
 typedef struct
 {

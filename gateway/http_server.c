@@ -1,5 +1,6 @@
 #include "http_server.h"
 #include "status.h"
+#include "protocol.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -113,7 +114,7 @@ int HttpServer_Init(void)
 }
 
 
-void HttpServer_Task(void)
+void HttpServer_Task(int serial_fd)
 {
     int client_fd;
     char request[512];
@@ -184,6 +185,48 @@ void HttpServer_Task(void)
     if (request_length == 0)
     {
         close(client_fd);
+	return;
+    }
+
+    if ((size_t)request_length >= sizeof(request))
+    {
+        request_length = sizeof(request) - 1;
+    }
+
+    request[request_length] = '\0';
+
+    if (strncmp(request, "GET /relay/1/on ", 16U) == 0)
+    {
+        (void)Protocol_RequestRelay(serial_fd, 1U, PROTOCOL_RELAY_ON);
+
+	snprintf(response,
+		 sizeof(response),
+		 "HTTP/1.1 303 See Other\r\n"
+		 "Location: /\r\n"
+		 "Connection: close\r\n"
+		 "\r\n");
+
+	(void)write(client_fd, response, strlen(response));
+
+	close(client_fd);
+
+	return;
+    }
+
+    if (strncmp(request, "GET /relay/1/off ", 17U) == 0)
+    {
+        (void)Protocol_RequestRelay(serial_fd, 1U, PROTOCOL_RELAY_OFF);
+
+	snprintf(response, sizeof(response),
+		 "HTTP/1.1 303 See Other\r\n"
+		 "Location: /\r\n"
+		 "Connection: close\r\n"
+		 "\r\n");
+
+	(void)write(client_fd, response, strlen(response));
+
+	close(client_fd);
+
 	return;
     }
     

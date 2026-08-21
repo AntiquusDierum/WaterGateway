@@ -3,7 +3,7 @@
 
 int HttpServer_Init(void);
 
-void HttpServer_Task(void);
+void HttpServer_Task(int serial_fd);
 
 void HttpServer_Close(void);
 

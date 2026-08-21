@@ -14,22 +14,38 @@
 
 typedef enum
 {
-    RTC_SYNC_IDLE = 0,
+    PROTOCOL_IDLE = 0,
+
     RTC_SYNC_WAIT_COMMAND_MODE,
     RTC_SYNC_WAIT_SET_ACK,
-    RTC_SYNC_WAIT_STREAM_MODE
+    RTC_SYNC_WAIT_STREAM_MODE,
 
-} RtcSyncState_t;
+    RELAY_WAIT_COMMAND_MODE,
+    RELAY_WAIT_ACK,
+    RELAY_WAIT_STREAM_MODE
 
-static RtcSyncState_t rtc_sync_state = RTC_SYNC_IDLE;
+} ProtocolState_t;
+
+static ProtocolState_t protocol_state = PROTOCOL_IDLE;
+
+static unsigned int pending_relay_number = 0U;
+static ProtocolRelayState_t pending_relay_state =
+    PROTOCOL_RELAY_UNKNOWN;
+
+static ProtocolRelayState_t relay1_state =
+    PROTOCOL_RELAY_UNKNOWN;
+
+static ProtocolRelayState_t relay2_state =
+    PROTOCOL_RELAY_UNKNOWN;
+
 static time_t rtc_sync_started = 0;
 static time_t rtc_sync_retry_after = 0;
 
-static void rtc_sync_set_state(RtcSyncState_t new_state)
+static void protocol_set_state(ProtocolState_t new_state)
 {
-    rtc_sync_state = new_state;
+    protocol_state = new_state;
 
-    if (new_state == RTC_SYNC_IDLE)
+    if (new_state == PROTOCOL_IDLE)
     {
         rtc_sync_started = 0;
     }
@@ -161,6 +177,73 @@ static int send_setdt_command(int fd)
     return Serial_WriteString(fd, command);
 }
 
+int Protocol_RequestRelay(
+    int serial_fd,
+    unsigned int relay_number,
+    ProtocolRelayState_t state)
+{
+    if ((relay_number < 1U) ||
+        (relay_number > 2U))
+    {
+        return -1;
+    }
+
+    if ((state != PROTOCOL_RELAY_OFF) &&
+        (state != PROTOCOL_RELAY_ON))
+    {
+        return -1;
+    }
+
+    /*
+     * Only one remote transaction may use the STM32
+     * command channel at a time.
+     */
+    if (protocol_state != PROTOCOL_IDLE)
+    {
+        return -1;
+    }
+
+    pending_relay_number = relay_number;
+    pending_relay_state = state;
+
+    if (Serial_WriteString(
+            serial_fd,
+            "\r") != 0)
+    {
+        pending_relay_number = 0U;
+        pending_relay_state =
+            PROTOCOL_RELAY_UNKNOWN;
+
+        return -1;
+    }
+
+    protocol_set_state(
+        RELAY_WAIT_COMMAND_MODE);
+
+    return 0;
+}
+
+ProtocolRelayState_t Protocol_GetRelayState(
+    unsigned int relay_number)
+{
+    switch (relay_number)
+    {
+        case 1U:
+            return relay1_state;
+
+        case 2U:
+            return relay2_state;
+
+        default:
+            return PROTOCOL_RELAY_UNKNOWN;
+    }
+}
+
+int Protocol_IsBusy(void)
+{
+    return (protocol_state != PROTOCOL_IDLE);
+}
+
 void Protocol_ProcessMessage(int fd, const char *message)
 {
     time_t stm_time;
@@ -200,9 +283,9 @@ void Protocol_ProcessMessage(int fd, const char *message)
 	}    
     }
     
-    switch (rtc_sync_state)
+    switch (protocol_state)
     {
-        case RTC_SYNC_IDLE:
+        case PROTOCOL_IDLE:
         {
             if (strncmp(message, "WB1,", 4U) != 0)
             {
@@ -246,7 +329,7 @@ void Protocol_ProcessMessage(int fd, const char *message)
 
 		    if (Serial_WriteString(fd, "\r") == 0)
 		    {
-		        rtc_sync_set_state(RTC_SYNC_WAIT_COMMAND_MODE);
+		        protocol_set_state(RTC_SYNC_WAIT_COMMAND_MODE);
 		    }
 		}
 	    }
@@ -260,7 +343,7 @@ void Protocol_ProcessMessage(int fd, const char *message)
 	    {
 	        if (send_setdt_command(fd) == 0)
 		{
-		    rtc_sync_set_state(RTC_SYNC_WAIT_SET_ACK);
+		    protocol_set_state(RTC_SYNC_WAIT_SET_ACK);
 		}
 	    }
        	 
@@ -276,7 +359,7 @@ void Protocol_ProcessMessage(int fd, const char *message)
             {
                 if (Serial_WriteString(fd, "exit\r") == 0)
                 {
-		    rtc_sync_set_state(RTC_SYNC_WAIT_STREAM_MODE);
+		    protocol_set_state(RTC_SYNC_WAIT_STREAM_MODE);
                 }
             }
 
@@ -292,15 +375,115 @@ void Protocol_ProcessMessage(int fd, const char *message)
                 printf(
                     "STM32 RTC synchronisation complete\n");
 		rtc_sync_retry_after = 0;
-		rtc_sync_set_state(RTC_SYNC_IDLE);
+		protocol_set_state(PROTOCOL_IDLE);
             }
 
             break;
         }
 
+        case RELAY_WAIT_COMMAND_MODE:
+	{
+	    if (strcmp(message, "REMOTE,MODE=COMMAND") == 0)
+	    {
+	        char command[32];
+
+		snprintf(
+			 command,
+			 sizeof(command),
+			 "relay %u %s\r",
+			 pending_relay_number,
+			 (pending_relay_state ==
+			  PROTOCOL_RELAY_ON)
+			 ? "on"
+			 : "off");
+
+		if (Serial_WriteString(fd, command) == 0)
+		{
+		    protocol_set_state(RELAY_WAIT_ACK);
+		}
+	    }
+
+	    break;
+	}
+
+        case RELAY_WAIT_ACK:
+	{
+	    unsigned int relay_number;
+	    char state[8];
+
+	    if (sscanf(message,
+		       "REMOTE,RELAY=%u,STATE=%7s",
+		       &relay_number,
+		       state) == 2)
+	    {
+	        if (relay_number == pending_relay_number)
+		{
+		    ProtocolRelayState_t confirmed_state;
+
+		    if (strcmp(state, "ON") == 0)
+		    {
+		        confirmed_state = PROTOCOL_RELAY_ON;
+		    }
+		    else if (strcmp(state, "OFF") == 0)
+		    {
+		        confirmed_state =
+			PROTOCOL_RELAY_OFF;
+		    }
+		    else
+		    {
+			break;
+		    }
+
+		    if (confirmed_state != pending_relay_state)
+		    {
+		        break;
+		    }
+
+		    if (relay_number == 1U)
+		    {
+		        relay1_state = confirmed_state;
+		    }
+		    else
+		    {
+		        relay2_state = confirmed_state;
+		    }
+
+		    printf(
+			   "Relay %u confirmed %s\n",
+			   relay_number,
+			   (confirmed_state ==
+			    PROTOCOL_RELAY_ON)
+			   ? "ON"
+			   : "OFF");
+
+		    if (Serial_WriteString(fd, "exit\r") == 0)
+		    {
+		        protocol_set_state(RELAY_WAIT_STREAM_MODE);
+		    }
+		}
+	    }
+
+	    break;
+	}
+
+        case RELAY_WAIT_STREAM_MODE:
+	{
+	    if (strcmp(message, "REMOTE,MODE=STREAM") == 0)
+	    {
+	        pending_relay_number = 0U;
+		pending_relay_state = PROTOCOL_RELAY_UNKNOWN;
+
+		protocol_set_state(PROTOCOL_IDLE);
+
+		printf("Relay command transaction complete\n");
+	    }
+
+	    break;
+	}
+
         default:
         {
-	    rtc_sync_set_state(RTC_SYNC_IDLE);
+	    protocol_set_state(PROTOCOL_IDLE);
 
             break;
         }
@@ -309,7 +492,17 @@ void Protocol_ProcessMessage(int fd, const char *message)
 
 void Protocol_Init(void)
 {
-    rtc_sync_set_state(RTC_SYNC_IDLE);
+    protocol_set_state(PROTOCOL_IDLE);
+
+    pending_relay_number = 0U;
+    pending_relay_state =
+        PROTOCOL_RELAY_UNKNOWN;
+
+    relay1_state =
+        PROTOCOL_RELAY_UNKNOWN;
+
+    relay2_state =
+        PROTOCOL_RELAY_UNKNOWN;
 }
 
 int Protocol_ParseTelemetry(
@@ -350,22 +543,26 @@ void Protocol_Task(int serial_fd)
 
     time_t now;
     double elapsed;
+    int was_rtc_sync;
 
-    if (rtc_sync_state == RTC_SYNC_IDLE)
+    if (protocol_state == PROTOCOL_IDLE)
     {
         return;
     }
 
     now = time(NULL);
 
-    elapsed = difftime(
-        now,
-        rtc_sync_started);
+    elapsed = difftime(now, rtc_sync_started);
 
+    was_rtc_sync =
+    (protocol_state == RTC_SYNC_WAIT_COMMAND_MODE) ||
+    (protocol_state == RTC_SYNC_WAIT_SET_ACK) ||
+    (protocol_state == RTC_SYNC_WAIT_STREAM_MODE);
+    
     if (elapsed >= RTC_SYNC_TIMEOUT_SECONDS)
     {
         fprintf(stderr,
-		"RTC synchronisation timed out; "
+		"Remote command transaction timed out; "
 		"forcing stream mode\n");
 
 	if (Serial_WriteString(serial_fd,"exit\r") != 0)
@@ -374,9 +571,14 @@ void Protocol_Task(int serial_fd)
 		    "Warning: unable to send stream-mode recovery command\n");
 	}
 
-	rtc_sync_retry_after = time(NULL) + (time_t)RTC_SYNC_RETRY_SECONDS;
-	
-	rtc_sync_set_state(RTC_SYNC_IDLE);
+	if (was_rtc_sync)
+	{
+	    rtc_sync_retry_after = time(NULL) + (time_t)RTC_SYNC_RETRY_SECONDS;
+	}
+
+	pending_relay_number = 0U;
+	pending_relay_state = PROTOCOL_RELAY_UNKNOWN;
+
+	protocol_set_state(PROTOCOL_IDLE);
     }
 }
-
