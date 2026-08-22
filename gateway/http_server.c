@@ -229,6 +229,40 @@ void HttpServer_Task(int serial_fd)
 
 	return;
     }
+
+    if (strncmp(request, "GET /relay/2/on ", 16U) == 0)
+    {
+        (void)Protocol_RequestRelay(serial_fd, 2U, PROTOCOL_RELAY_ON);
+
+	snprintf(response, sizeof(response),
+		 "HTTP/1.1 303 See Other\r\n"
+		 "Location: /\r\n"
+		 "Connection: close\r\n"
+		 "\r\n");
+
+	(void)write(client_fd, response, strlen(response));
+
+	close(client_fd);
+
+	return;
+    }
+
+    if (strncmp(request, "GET /relay/2/off ", 17U) == 0)
+    {
+        (void)Protocol_RequestRelay(serial_fd, 2U, PROTOCOL_RELAY_OFF);
+
+	snprintf(response, sizeof(response),
+		 "HTTP/1.1 303 See Other\r\n"
+		 "Location: /\r\n"
+		 "Connection: close\r\n"
+		 "\r\n");
+
+	(void)write(client_fd, response, strlen(response));
+
+	close(client_fd);
+
+	return;
+    }
     
     status = Status_Get();
 

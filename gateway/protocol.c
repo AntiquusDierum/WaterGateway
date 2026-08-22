@@ -262,9 +262,15 @@ void Protocol_ProcessMessage(int fd, const char *message)
     {
         Telemetry_t telemetry;
 
-	if (Protocol_ParseTelemetry(message, &telemetry) == 0)
-	{
-	    Status_UpdateTelemetry(&telemetry);
+    if (Protocol_ParseTelemetry(message, &telemetry) == 0)
+    {
+    /*
+     * The STM32 telemetry is authoritative for
+     * the actual Pump output state.
+     */
+        relay1_state = telemetry.pump_state;
+
+        Status_UpdateTelemetry(&telemetry);
 	    if (telemetry_time_is_sane(&telemetry))
 	    {
 	        if (Logger_LogTelemetry(&telemetry) != 0)
@@ -412,9 +418,25 @@ void Protocol_ProcessMessage(int fd, const char *message)
 	    char state[8];
 
 	    if (sscanf(message,
+		       "REMOTE,RELAY=%u,ERROR=LOCKED_OUT",
+		       &relay_number) == 1)
+	    {
+	        if (relay_number == pending_relay_number)
+		{
+		    printf("Relay %u command rejected: locked out\n",
+			 relay_number);
+
+		    if (Serial_WriteString(fd, "exit\r") == 0)
+		    {
+		        protocol_set_state(RELAY_WAIT_STREAM_MODE);
+		    }
+		}
+
+		break;
+	    }
+	    if (sscanf(message,
 		       "REMOTE,RELAY=%u,STATE=%7s",
-		       &relay_number,
-		       state) == 2)
+		       &relay_number, state) == 2)
 	    {
 	        if (relay_number == pending_relay_number)
 		{
@@ -505,9 +527,7 @@ void Protocol_Init(void)
         PROTOCOL_RELAY_UNKNOWN;
 }
 
-int Protocol_ParseTelemetry(
-    const char *message,
-    Telemetry_t *telemetry)
+int Protocol_ParseTelemetry(const char *message, Telemetry_t *telemetry)
 {
     if ((message == NULL) ||
         (telemetry == NULL))
@@ -515,13 +535,18 @@ int Protocol_ParseTelemetry(
         return -1;
     }
 
+    char pump_state[8];
+    int pump_lockout;
+
     if (sscanf(
             message,
             "WB1,DATE=%d-%d-%d,"
             "TIME=%d:%d:%d,"
             "TEMP=%fC,"
             "HUM=%f%%,"
-            "WATER=%luHz",
+            "WATER=%luHz,"
+            "PUMP=%7[^,],"
+            "LOCKOUT=%d",
             &telemetry->year,
             &telemetry->month,
             &telemetry->day,
@@ -530,10 +555,32 @@ int Protocol_ParseTelemetry(
             &telemetry->second,
             &telemetry->temperature_c,
             &telemetry->humidity_percent,
-            &telemetry->water_frequency_hz) != 9)
+            &telemetry->water_frequency_hz,
+            pump_state,
+            &pump_lockout) != 11)
     {
         return -1;
     }
+
+    if (strcmp(pump_state, "ON") == 0)
+    {
+        telemetry->pump_state = PROTOCOL_RELAY_ON;
+    }
+    else if (strcmp(pump_state, "OFF") == 0)
+    {
+        telemetry->pump_state =  PROTOCOL_RELAY_OFF;
+    }
+    else
+    {
+        return -1;
+    }
+
+    if ((pump_lockout != 0) && (pump_lockout != 1))
+    {
+        return -1;
+    }
+
+    telemetry->pump_lockout = pump_lockout;
 
     return 0;
 }

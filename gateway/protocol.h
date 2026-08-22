@@ -36,6 +36,9 @@ typedef struct
 
     unsigned long water_frequency_hz;
 
+    ProtocolRelayState_t pump_state;
+    int pump_lockout;
+
 } Telemetry_t;
 
 int Protocol_ParseTelemetry(const char *message, Telemetry_t *telemetry);
