@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+#include <poll.h>
 
 #define HTTP_PORT 8080
 
@@ -166,6 +167,24 @@ void HttpServer_Task(int serial_fd)
      */
     ssize_t request_length;
 
+    struct pollfd pfd;
+    int poll_result;
+
+    pfd.fd = client_fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+
+    poll_result = poll(
+        &pfd,
+        1,
+        50);
+
+    if (poll_result <= 0)
+    {
+        close(client_fd);
+        return;
+    }
+
     request_length = read(client_fd,request,sizeof(request));
 
     if (request_length < 0)
@@ -296,14 +315,14 @@ void HttpServer_Task(int serial_fd)
 	    "<html>"
 	    "<head>"
 	    "<title>WaterGateway</title>"
-	    "<meta http-equiv=\"refresh\" content=\"5\">"
+	    "<meta http-equiv=\"refresh\" content=\"1\">"
 	    "<style>"
 	    "* { box-sizing: border-box; }"
 
 	    "body {"
 	    "  font-family: sans-serif;"
 	    "  margin: 0;"
-	    "  padding: 32px;"
+	    "  padding: 20px;"
 	    "  background: #111;"
 	    "  color: #eee;"
 	    "  text-align: center;"
@@ -312,13 +331,13 @@ void HttpServer_Task(int serial_fd)
 	    "h1 {"
 	    "  font-size: 4em;"
 	    "  letter-spacing: 0.08em;"
-	    "  margin: 20px 0 32px 0;"
+	    "  margin: 10px 0 20px 0;"
 	    "}"
 
 	    ".panel {"
 	    "  background: #222;"
-	    "  padding: 28px 20px;"
-	    "  margin-bottom: 24px;"
+	    "  padding: 20px 18px;"
+	    "  margin-bottom: 16px;"
 	    "  border-radius: 16px;"
 	    "}"
 
@@ -335,13 +354,48 @@ void HttpServer_Task(int serial_fd)
 	    ".reading {"
 	    "  font-size: 3.2em;"
 	    "  font-weight: bold;"
-	    "  margin: 32px 0;"
+	    "  margin: 22px 0;"
 	    "}"
 
 	    ".status {"
 	    "  font-size: 2em;"
 	    "  font-weight: bold;"
 	    "}"
+
+        ".pump-button {"
+        "  display: inline-block;"
+        "  min-width: 360px;"
+        "  padding: 28px 40px;"
+        "  margin-top: 20px;"
+        "  border-radius: 18px;"
+        "  font-size: 2.2em;"
+        "  font-weight: bold;"
+        "  text-decoration: none;"
+        "  background: #3a3a3a;"
+        "  color: #fff;"
+        "  border: 3px solid #777;"
+        "}"
+
+        ".pump-button:active {"
+        "  transform: scale(0.97);"
+        "}"
+
+        ".pump-start {"
+        "  background: #1f6f3f;"
+        "  border-color: #3fa867;"
+        "}"
+
+        ".pump-stop {"
+        "  background: #8a2d2d;"
+        "  border-color: #c65353;"
+        "}"
+
+        ".pump-lockout {"
+        "  font-size: 1.6em;"
+        "  font-weight: bold;"
+        "  margin-top: 20px;"
+        "}"
+
 	    "</style>"
 	    "</head>"
 	    "<body>"
@@ -364,6 +418,12 @@ void HttpServer_Task(int serial_fd)
 	    "%lu Hz</div>"
 	    "</div>"
 
+        "<div class=\"panel\">"
+        "<div class=\"reading\"><span class=\"label\">Pump:</span>"
+        "%s</div>"
+        "%s"
+        "</div>"
+
 	    "<div class=\"panel\">"
 	    "<div><span class=\"label\">Packets received:</span>"
 	    "%lu</div>"
@@ -379,6 +439,16 @@ void HttpServer_Task(int serial_fd)
             status->telemetry.temperature_c,
             status->telemetry.humidity_percent,
             status->telemetry.water_frequency_hz,
+            (status->telemetry.pump_state == PROTOCOL_RELAY_ON)
+                ? "ON"
+                : (status->telemetry.pump_lockout
+                    ? "LOCKED OUT"
+                    : "OFF"),
+            (status->telemetry.pump_state == PROTOCOL_RELAY_ON)
+                ? "<a class=\"pump-button pump-stop\" href=\"/relay/1/off\">STOP PUMP</a>"
+                : (status->telemetry.pump_lockout
+                    ? "<div class=\"pump-lockout\">Pump restart temporarily inhibited</div>"
+                    : "<a class=\"pump-button pump-start\" href=\"/relay/1/on\">START PUMP</a>"),
             status->packets_received,
             status->parse_errors);
     }
